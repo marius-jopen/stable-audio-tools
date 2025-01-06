@@ -31,10 +31,17 @@ def generate_diffusion_uncond(
     # Seed
     # The user can explicitly set the seed to deterministically generate the same output. Otherwise, use a random seed.
     seed = seed if seed != -1 else np.random.randint(0, 2**32 - 1, dtype=np.uint32)
-    print(seed)
+    print(f"[stable-audio-tools, generation.py, generate_diffusion_uncond] Seed: {seed}")
     torch.manual_seed(seed)
-    # Define the initial noise immediately after setting the seed
+    # After setting the seed
+    print(f"[stable-audio-tools, generation.py, generate_diffusion_uncond] === Generating initial noise ===")
+    print(f"[stable-audio-tools, generation.py, generate_diffusion_uncond] Shape: {[batch_size, model.io_channels, sample_size]}")
+    
+    print(f"\033[stable-audio-tools, generation.py, generate_diffusion_uncond] NOISE GENERATION STEP 1 with torch.randn\033[0m")
+    
     noise = torch.randn([batch_size, model.io_channels, sample_size], device=device)
+
+    print(f"[stable-audio-tools, generation.py, generate_diffusion_uncond] Noise stats - Min: {noise.min():.3f}, Max: {noise.max():.3f}, Mean: {noise.mean():.3f}")
 
     if init_audio is not None:
         # The user supplied some initial audio (for inpainting or variation). Let us prepare the input audio.
@@ -126,6 +133,9 @@ def generate_diffusion_cond(
         **sampler_kwargs: Additional keyword arguments to pass to the sampler.    
     """
 
+    print("[stable-audio-tools, generation.py, generate_diffusion_cond] === USING LOCAL STABLE-AUDIO-TOOLS ===")
+    print(f"[stable-audio-tools, generation.py, generate_diffusion_cond] Generating audio with steps={steps}, cfg_scale={cfg_scale}")
+
     # The length of the output in audio samples 
     audio_sample_size = sample_size
 
@@ -138,8 +148,11 @@ def generate_diffusion_cond(
     seed = seed if seed != -1 else np.random.randint(0, 2**32 - 1, dtype=np.uint32)
     print(seed)
     torch.manual_seed(seed)
-    # Define the initial noise immediately after setting the seed
+    # After setting the seed
+    print(f"[stable-audio-tools, generation.py, generate_diffusion_cond] === Generating initial noise ===")
+    print(f"[stable-audio-tools, generation.py, generate_diffusion_cond] Shape: {[batch_size, model.io_channels, sample_size]}")
     noise = torch.randn([batch_size, model.io_channels, sample_size], device=device)
+    print(f"[stable-audio-tools, generation.py, generate_diffusion_cond] Noise stats - Min: {noise.min():.3f}, Max: {noise.max():.3f}, Mean: {noise.mean():.3f}")
 
     torch.backends.cuda.matmul.allow_tf32 = False
     torch.backends.cudnn.allow_tf32 = False

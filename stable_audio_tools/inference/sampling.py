@@ -1,8 +1,28 @@
 import torch
 import math
 from tqdm import trange, tqdm
+import os
+
+import sys
+print("[stable-audio-tools, sampling.py] Python path before:", sys.path)
+
+# Remove any existing k-diffusion import
+if 'k_diffusion' in sys.modules:
+    print("[stable-audio-tools, sampling.py, imports] Removing existing k-diffusion from sys.modules")
+    del sys.modules['k_diffusion']
+
+# Get absolute path to k-diffusion
+kdiff_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../k-diffusion"))
+print("[stable-audio-tools, sampling.py, imports] K-diffusion absolute path:", kdiff_path)
+
+# Insert at beginning of path to take precedence
+sys.path.insert(0, kdiff_path)
+print("[stable-audio-tools, sampling.py, imports] Python path after:", sys.path)
 
 import k_diffusion as K
+print("[stable-audio-tools, sampling.py, imports] K-diffusion loaded from:", K.__file__)
+print("[stable-audio-tools, sampling.py, imports] Available modules in K:", dir(K))
+
 
 # Define the noise schedule and sampling loop
 def get_alphas_sigmas(t):
@@ -120,24 +140,36 @@ def sample_k(
         rho=1.0, device="cuda", 
         callback=None, 
         cond_fn=None,
+        quantum=False,
         **extra_args
     ):
+    print(f"[stable-audio-tools, sampling.py, sample_k] === Using k-diffusion sampler: {sampler_type} ===")
+    print(f"[stable-audio-tools, sampling.py, sample_k]Steps: {steps}")
+    print(f"[stable-audio-tools, sampling.py, sample_k] Extra args: {extra_args.keys()}")
 
     denoiser = K.external.VDenoiser(model_fn)
 
     if cond_fn is not None:
         denoiser = make_cond_model_fn(denoiser, cond_fn)
 
-    # Make the list of sigmas. Sigma values are scalars related to the amount of noise each denoising step has
+    # Make the list of sigmas
     sigmas = K.sampling.get_sigmas_polyexponential(steps, sigma_min, sigma_max, rho, device=device)
-    # Scale the initial noise by sigma 
-    noise = noise * sigmas[0]
-
-    wrapped_callback = callback
+    
+    # Create a wrapper for the existing callback
+    def logging_callback(args):
+        i = args["i"]
+        sigma = args["sigma"]
+        if i % 10 == 0:  # Print every 10 steps
+            print(f"[stable-audio-tools, sampling.py, logging_callback] Step {i}/{steps} using {sampler_type}")
+            print(f"[stable-audio-tools, sampling.py, logging_callback] Current sigma: {sigma:.6f}")
+        
+        if callback is not None:
+            callback(args)
+    
+    wrapped_callback = logging_callback
 
     if mask is None and init_data is not None:
         # VARIATION (no inpainting)
-        # set the initial latent to the init_data, and noise it with initial sigma
         x = init_data + noise 
     elif mask is not None and init_data is not None:
         # INPAINTING
@@ -170,27 +202,34 @@ def sample_k(
             wrapped_callback = lambda args: (inpainting_callback(args), callback(args))
     else:
         # SAMPLING
-        # set the initial latent to noise
         x = noise
 
 
     with torch.cuda.amp.autocast():
         if sampler_type == "k-heun":
+            print("[stable-audio-tools, sampling.py, sample_k] Using Heun sampler")
             return K.sampling.sample_heun(denoiser, x, sigmas, disable=False, callback=wrapped_callback, extra_args=extra_args)
         elif sampler_type == "k-lms":
+            print("[stable-audio-tools, sampling.py, sample_k] Using LMS sampler")
             return K.sampling.sample_lms(denoiser, x, sigmas, disable=False, callback=wrapped_callback, extra_args=extra_args)
         elif sampler_type == "k-dpmpp-2s-ancestral":
+            print("[stable-audio-tools, sampling.py, sample_k] Using DPM++ 2S ancestral sampler")
             return K.sampling.sample_dpmpp_2s_ancestral(denoiser, x, sigmas, disable=False, callback=wrapped_callback, extra_args=extra_args)
         elif sampler_type == "k-dpm-2":
+            print("[stable-audio-tools, sampling.py, sample_k] Using DPM 2 sampler")
             return K.sampling.sample_dpm_2(denoiser, x, sigmas, disable=False, callback=wrapped_callback, extra_args=extra_args)
         elif sampler_type == "k-dpm-fast":
+            print("[stable-audio-tools, sampling.py, sample_k] Using DPM fast sampler")
             return K.sampling.sample_dpm_fast(denoiser, x, sigma_min, sigma_max, steps, disable=False, callback=wrapped_callback, extra_args=extra_args)
         elif sampler_type == "k-dpm-adaptive":
+            print("[stable-audio-tools, sampling.py, sample_k] Using DPM adaptive sampler")
             return K.sampling.sample_dpm_adaptive(denoiser, x, sigma_min, sigma_max, rtol=0.01, atol=0.01, disable=False, callback=wrapped_callback, extra_args=extra_args)
         elif sampler_type == "dpmpp-2m-sde":
+            print("[stable-audio-tools, sampling.py, sample_k] Using DPM++ 2M SDE sampler")
             return K.sampling.sample_dpmpp_2m_sde(denoiser, x, sigmas, disable=False, callback=wrapped_callback, extra_args=extra_args)
         elif sampler_type == "dpmpp-3m-sde":
-            return K.sampling.sample_dpmpp_3m_sde(denoiser, x, sigmas, disable=False, callback=wrapped_callback, extra_args=extra_args)
+            print(f"[stable-audio-tools, sampling.py, sample_k] Using DPM++ 3M SDE sampler (quantum={quantum})")
+            return K.sampling.sample_dpmpp_3m_sde(denoiser, x, sigmas, disable=False, callback=wrapped_callback, extra_args=extra_args, quantum=quantum)
 
 # Uses discrete Euler sampling for rectified flow models
 # init_data is init_audio as latents (if this is latent diffusion)
